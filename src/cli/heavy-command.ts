@@ -239,7 +239,7 @@ async function handleHeavyDeactivate(args: string[], paths: HeavyPaths, options:
   await writeRawConfig(configPath, config);
 
   // Remove active marker
-  await fsPromises.unlink(activePath).catch(() => {});
+  await unlinkUnlessMissing(activePath);
 
   console.log(`Deactivated: ${name}`);
 }
@@ -369,10 +369,14 @@ async function writeActiveMarker(activePath: string, definition: HeavyMcpDefinit
     mcpServers: definition.mcpServers,
   };
 
-  await fsPromises.unlink(activePath).catch((error) => {
+  await unlinkUnlessMissing(activePath);
+  await fsPromises.writeFile(activePath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8');
+}
+
+async function unlinkUnlessMissing(targetPath: string): Promise<void> {
+  await fsPromises.unlink(targetPath).catch((error) => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
   });
-  await fsPromises.writeFile(activePath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8');
 }

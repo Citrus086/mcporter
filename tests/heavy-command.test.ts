@@ -141,6 +141,37 @@ describe('mcporter heavy CLI', () => {
     logSpy.mockRestore();
   });
 
+  it('surfaces active marker unlink errors during deactivate', async () => {
+    await handleHeavyCli(['activate', 'chrome-devtools'], { configPath, rootDir: tempDir });
+    const activePath = path.join(tempDir, 'config', 'heavy', 'active', 'chrome-devtools.json');
+    const originalUnlink = fs.unlink;
+    const unlinkError = new Error('permission denied') as NodeJS.ErrnoException;
+    unlinkError.code = 'EACCES';
+
+    vi.spyOn(fs, 'unlink').mockImplementation(async (targetPath) => {
+      if (targetPath === activePath) {
+        throw unlinkError;
+      }
+      return originalUnlink(targetPath);
+    });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((value?: unknown) => {
+      if (typeof value === 'string') {
+        logs.push(value);
+      }
+    });
+
+    await expect(
+      handleHeavyCli(['deactivate', 'chrome-devtools'], { configPath, rootDir: tempDir })
+    ).rejects.toMatchObject({ code: 'EACCES' });
+
+    await expect(fs.readFile(activePath, 'utf8')).resolves.toContain('chrome-devtools');
+    expect(logs).not.toContain('Deactivated: chrome-devtools');
+
+    logSpy.mockRestore();
+  });
+
   it('deactivates config-backed heavy MCPs even when another heavy MCP has a marker', async () => {
     await handleHeavyCli(['activate', 'chrome-devtools'], { configPath, rootDir: tempDir });
     await fs.writeFile(
