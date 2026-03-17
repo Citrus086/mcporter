@@ -230,9 +230,12 @@ async function handleHeavyDeactivate(args: string[], paths: HeavyPaths, options:
     serverNames = Object.keys(definition.mcpServers);
   }
 
-  // Remove the server(s) from config
+  // Remove the server(s) from config, but skip those still needed by other active heavy MCPs
+  const otherActiveServerNames = await getOtherActiveHeavyServerNames(paths, name);
   for (const serverName of serverNames) {
-    delete config.mcpServers?.[serverName];
+    if (!otherActiveServerNames.has(serverName)) {
+      delete config.mcpServers?.[serverName];
+    }
   }
 
   // Write back config
@@ -330,6 +333,38 @@ function findActiveHeavyDefinition(
 
 function getHeavyDefinitionFromMarker(marker: ActiveHeavyMcpMarker): HeavyMcpDefinition | null {
   return marker.mcpServers ? { mcpServers: marker.mcpServers } : null;
+}
+
+/**
+ * Get the set of server names that are still needed by other active heavy MCPs.
+ * This prevents accidentally deleting shared servers when deactivating one heavy MCP.
+ */
+async function getOtherActiveHeavyServerNames(paths: HeavyPaths, excludeName: string): Promise<Set<string>> {
+  const serverNames = new Set<string>();
+
+  try {
+    const entries = await fsPromises.readdir(paths.activeDir, { withFileTypes: true });
+    const markerFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json') && entry.name !== `${excludeName}.json`)
+      .map((entry) => entry.name);
+
+    for (const filename of markerFiles) {
+      const markerPath = path.join(paths.activeDir, filename);
+      const marker = await readActiveMarker(markerPath);
+      if (marker) {
+        for (const serverName of marker.serverNames) {
+          serverNames.add(serverName);
+        }
+      }
+    }
+  } catch (error) {
+    // If activeDir doesn't exist or can't be read, just return empty set
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  return serverNames;
 }
 
 async function readHeavyDefinitionForActiveDetection(

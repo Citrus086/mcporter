@@ -721,6 +721,56 @@ describe('mcporter heavy CLI', () => {
     logSpy.mockRestore();
   });
 
+  it('preserves shared servers when deactivating a heavy MCP', async () => {
+    // Create two heavy definitions that share a server
+    await writeHeavyDefinition('devtools-suite', ['chrome-devtools', 'playwright']);
+    await writeHeavyDefinition('browser-suite', ['chrome-devtools']);
+
+    // Activate both
+    await handleHeavyCli(['activate', 'devtools-suite'], { configPath, rootDir: tempDir });
+    await handleHeavyCli(['activate', 'browser-suite'], { configPath, rootDir: tempDir });
+
+    // Verify both servers are in config
+    let config = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command: string }>;
+    };
+    expect(config.mcpServers['chrome-devtools']?.command).toBe('npx');
+    expect(config.mcpServers['playwright']?.command).toBe('npx');
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((value?: unknown) => {
+      if (typeof value === 'string') {
+        logs.push(value);
+      }
+    });
+
+    // Deactivate one - chrome-devtools should remain because browser-suite still needs it
+    await handleHeavyCli(['deactivate', 'devtools-suite'], { configPath, rootDir: tempDir });
+
+    config = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command: string }>;
+    };
+    // chrome-devtools should still be there because browser-suite is active
+    expect(config.mcpServers['chrome-devtools']?.command).toBe('npx');
+    // playwright should be removed
+    expect(config.mcpServers['playwright']).toBeUndefined();
+
+    expect(logs).toContain('Deactivated: devtools-suite');
+
+    // Now deactivate browser-suite
+    await handleHeavyCli(['deactivate', 'browser-suite'], { configPath, rootDir: tempDir });
+
+    config = JSON.parse(await fs.readFile(configPath, 'utf8')) as {
+      mcpServers: Record<string, { command: string }>;
+    };
+    // Now chrome-devtools should be removed
+    expect(config.mcpServers['chrome-devtools']).toBeUndefined();
+
+    expect(logs).toContain('Deactivated: browser-suite');
+
+    logSpy.mockRestore();
+  });
+
   async function writeHeavyDefinition(name: string, serverNames: string[]): Promise<void> {
     await fs.writeFile(
       path.join(availableDir, `${name}.json`),
